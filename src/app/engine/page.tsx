@@ -22,8 +22,14 @@ export default function EnginePage() {
             const result = await generateSetlistAction(playlistUrl, {
                 targetBpm: parseInt(targetBpm),
             });
-            setSetlist(result);
-            if (result.length === 0) {
+
+            if (!result.success) {
+                setError(result.error || "Unknown server error");
+                return;
+            }
+
+            setSetlist(result.data);
+            if (result.data.length === 0) {
                 setError("Could not generate a valid setlist from this playlist with the given constraints.");
             }
         } catch (err: any) {
