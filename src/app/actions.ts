@@ -50,26 +50,42 @@ export async function generateSetlistAction(
         const featuresMap = new Map<string, any>();
 
         // Set Access Token for this request scope
-        spotifyApi.setAccessToken(session.accessToken);
+        // spotifyApi.setAccessToken(session.accessToken);
 
         try {
             for (let i = 0; i < trackIds.length; i += chunkSize) {
                 const chunk = trackIds.slice(i, i + chunkSize);
-                const response = await spotifyApi.getAudioFeaturesForTracks(chunk);
 
-                response.body.audio_features.forEach((f) => {
-                    if (f) {
-                        featuresMap.set(f.id, f);
-                    }
+                const idsParam = chunk.join(",");
+                const response = await fetch(`https://api.spotify.com/v1/audio-features?ids=${idsParam}`, {
+                    headers: {
+                        Authorization: `Bearer ${session.accessToken}`,
+                    },
+                    cache: "no-store"
                 });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error(`[Action] Spotify API Error (${response.status}):`, errorText);
+                    // Throw with the actual error text from Spotify
+                    throw new Error(`Spotify API ${response.status}: ${errorText}`);
+                }
+
+                const data = await response.json();
+
+                if (data && data.audio_features) {
+                    data.audio_features.forEach((f: any) => {
+                        if (f) {
+                            featuresMap.set(f.id, f);
+                        }
+                    });
+                }
             }
         } catch (error: any) {
             console.error("[Action] Error fetching audio features:", error);
-            // Don't fail completely, just proceed with basic features if we have to
-            // But usually this means token issues.
             return {
                 success: false,
-                error: `Spotify API Error: ${error.message || "Failed to analyze tracks"}`
+                error: `Spotify Analysis Failed: ${error.message || "Unknown error"}`
             };
         }
 
