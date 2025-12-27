@@ -12,76 +12,96 @@ const spotifyApi = new SpotifyWebApi({
     clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
 });
 
+export type SetlistResponse =
+    | { success: true; data: TrackWithFeatures[] }
+    | { success: false; error: string };
+
 export async function generateSetlistAction(
     playlistUrl: string,
     moodInput: MoodInput
-): Promise<TrackWithFeatures[]> {
-    const session = await getServerSession(authOptions);
-
-    if (!session || !session.accessToken) {
-        throw new Error("Unauthorized. Please log in with Spotify.");
-    }
-
-    // 1. Fetch Tracks (Basic Info)
-    let tracks: TrackWithFeatures[] = [];
+): Promise<SetlistResponse> {
     try {
-        tracks = await fetchPlaylistTracksAction(playlistUrl, session.accessToken);
-    } catch (e: any) {
-        throw new Error(`Failed to fetch playlist: ${e.message}`);
-    }
+        console.log(`[Action] Generating setlist for: ${playlistUrl}`);
 
-    if (tracks.length === 0) return [];
+        const session = await getServerSession(authOptions);
 
-    // 2. Fetch Audio Features (Server-Side)
-    // Spotify allows fetching up to 100 tracks at a time
-    const trackIds = tracks.map(t => t.id);
-    const chunkSize = 100;
-    const featuresMap = new Map<string, any>();
-
-    // Set Access Token for this request scope
-    spotifyApi.setAccessToken(session.accessToken);
-
-    try {
-        for (let i = 0; i < trackIds.length; i += chunkSize) {
-            const chunk = trackIds.slice(i, i + chunkSize);
-            const response = await spotifyApi.getAudioFeaturesForTracks(chunk);
-
-            response.body.audio_features.forEach((f) => {
-                if (f) {
-                    featuresMap.set(f.id, f);
-                }
-            });
+        if (!session || !session.accessToken) {
+            console.error("[Action] No session found");
+            return { success: false, error: "Unauthorized. Please log in with Spotify." };
         }
-    } catch (error) {
-        console.error("Error fetching audio features:", error);
-        throw new Error("Failed to analyze track features.");
+
+        // 1. Fetch Tracks (Basic Info)
+        let tracks: TrackWithFeatures[] = [];
+        try {
+            tracks = await fetchPlaylistTracksAction(playlistUrl, session.accessToken);
+        } catch (e: any) {
+            console.error("[Action] Fetch tracks failed:", e);
+            return { success: false, error: `Failed to fetch playlist: ${e.message}` };
+        }
+
+        if (tracks.length === 0) {
+            return { success: true, data: [] };
+        }
+
+        // 2. Fetch Audio Features (Server-Side)
+        console.log(`[Action] Fetching features for ${tracks.length} tracks`);
+        const trackIds = tracks.map(t => t.id);
+        const chunkSize = 100;
+        const featuresMap = new Map<string, any>();
+
+        // Set Access Token for this request scope
+        spotifyApi.setAccessToken(session.accessToken);
+
+        try {
+            for (let i = 0; i < trackIds.length; i += chunkSize) {
+                const chunk = trackIds.slice(i, i + chunkSize);
+                const response = await spotifyApi.getAudioFeaturesForTracks(chunk);
+
+                response.body.audio_features.forEach((f) => {
+                    if (f) {
+                        featuresMap.set(f.id, f);
+                    }
+                });
+            }
+        } catch (error: any) {
+            console.error("[Action] Error fetching audio features:", error);
+            // Don't fail completely, just proceed with basic features if we have to
+            // But usually this means token issues.
+            return {
+                success: false,
+                error: `Spotify API Error: ${error.message || "Failed to analyze tracks"}`
+            };
+        }
+
+        // 3. Merge Features
+        const fullTracks: TrackWithFeatures[] = tracks.map(track => {
+            const f = featuresMap.get(track.id);
+            if (!f) return track; // Should not happen often
+
+            const camelot = convertSpotifyToCamelot(f.key, f.mode);
+
+            return {
+                ...track,
+                bpm: Math.round(f.tempo),
+                energy: f.energy,
+                valence: f.valence,
+                danceability: f.danceability,
+                key: f.key,
+                mode: f.mode,
+                camelot: camelot
+            };
+        });
+
+        // 4. Run Logic
+        const setlist = generateSetlist(fullTracks, moodInput);
+        console.log(`[Action] Generated setlist with ${setlist.length} tracks`);
+
+        return { success: true, data: setlist };
+
+    } catch (err: any) {
+        console.error("[Action] Unexpected error:", err);
+        return { success: false, error: `Server Error: ${err.message || String(err)}` };
     }
-
-    // 3. Merge Features
-    const fullTracks: TrackWithFeatures[] = tracks.map(track => {
-        const f = featuresMap.get(track.id);
-        if (!f) return track; // Should not happen often
-
-        // Spotify Key: 0=C, 1=C#, etc. Mode: 1=Major, 0=Minor.
-        // Convert to Camelot
-        const camelot = convertSpotifyToCamelot(f.key, f.mode);
-
-        return {
-            ...track,
-            bpm: Math.round(f.tempo),
-            energy: f.energy,
-            valence: f.valence,
-            danceability: f.danceability,
-            key: f.key,
-            mode: f.mode,
-            camelot: camelot
-        };
-    });
-
-    // 4. Run Logic
-    const setlist = generateSetlist(fullTracks, moodInput);
-
-    return setlist;
 }
 
 // Reuse existing logic from previous action, but strictly as a helper now
