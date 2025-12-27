@@ -37,10 +37,17 @@ export function SetlistDashboard() {
                 startVibe: vibe,
             });
 
-            if (result.length === 0) {
+            if (!result.success) {
+                setError(result.error || "Unknown server error");
+                return;
+            }
+
+            const tracks = result.data;
+
+            if (tracks.length === 0) {
                 setError("No compatible tracks found or playlist is empty.");
             } else {
-                setSetlist(result);
+                setSetlist(tracks);
             }
 
         } catch (e: any) {
