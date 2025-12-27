@@ -1,9 +1,10 @@
 "use client";
-
+import Script from "next/script";
 import { useState } from "react";
-import { generateSetlistAction } from "@/app/actions";
-import { TrackWithFeatures } from "@/lib/setlist-logic";
+import { fetchPlaylistTracksAction } from "@/app/actions";
+import { generateSetlist, TrackWithFeatures } from "@/lib/setlist-logic";
 import { signIn, signOut, useSession } from "next-auth/react";
+import { useAudioAnalysis } from "@/hooks/use-audio-analysis";
 
 export function SetlistDashboard() {
     const { data: session } = useSession();
@@ -13,6 +14,9 @@ export function SetlistDashboard() {
     const [setlist, setSetlist] = useState<TrackWithFeatures[] | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    // Hybrid Analysis Hook
+    const { startAnalysis, status: analysisStatus, progress, currentTrackName } = useAudioAnalysis();
 
     const handleGenerate = async () => {
         if (!url) {
@@ -31,23 +35,37 @@ export function SetlistDashboard() {
         setSetlist(null);
 
         try {
-            // Server-Action handles everything now (Fetch -> Analyze -> Sort)
-            const result = await generateSetlistAction(url, {
+            // 1. Fetch Tracks (Server Side)
+            // We only need the token if the server action doesn't get it from session, 
+            // but our updated action handles session lookup.
+            const tracks = await fetchPlaylistTracksAction(url);
+
+            if (tracks.length === 0) {
+                setError("No compatible tracks found or playlist is empty.");
+                setIsLoading(false);
+                return;
+            }
+
+            // 2. Client Side Analysis (iTunes + Essentia)
+            // This runs in the browser
+            const analyzedTracks = await startAnalysis(tracks);
+
+            if (!analyzedTracks || analyzedTracks.length === 0) {
+                setError("Analysis failed. Could not analyze tracks.");
+                setIsLoading(false);
+                return;
+            }
+
+            // 3. Logic (Client Side)
+            const result = generateSetlist(analyzedTracks, {
                 targetBpm: bpm,
                 startVibe: vibe,
             });
 
-            if (!result.success) {
-                setError(result.error || "Unknown server error");
-                return;
-            }
-
-            const tracks = result.data;
-
-            if (tracks.length === 0) {
-                setError("No compatible tracks found or playlist is empty.");
+            if (result.length === 0) {
+                setError("No compatible tracks found based on your vibe/BPM.");
             } else {
-                setSetlist(tracks);
+                setSetlist(result);
             }
 
         } catch (e: any) {
@@ -60,6 +78,10 @@ export function SetlistDashboard() {
 
     return (
         <div className="w-full max-w-4xl mx-auto space-y-10">
+            {/* Load Essentia Dependencies */}
+            <Script src="/essentia/essentia-wasm.web.js" strategy="afterInteractive" />
+            <Script src="/essentia/essentia.js-core.js" strategy="afterInteractive" />
+
             {/* Auth State Header */}
             <div className="flex justify-end">
                 {!session ? (
@@ -135,15 +157,23 @@ export function SetlistDashboard() {
 
                 <button
                     onClick={handleGenerate}
-                    disabled={isLoading}
+                    disabled={isLoading || analysisStatus === 'analyzing'}
                     className="mt-2 w-full bg-white text-black font-bold text-lg py-4 rounded-xl hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all active:scale-[0.98]"
                 >
                     {isLoading ? (
                         <div className="flex flex-col items-center justify-center gap-2">
                             <span className="flex items-center gap-2">
                                 <span className="w-5 h-5 border-2 border-black/30 border-t-black rounded-full animate-spin"></span>
-                                Generating Setlist...
+                                {analysisStatus === 'analyzing'
+                                    ? `Analyzing: ${currentTrackName} (${progress}%)`
+                                    : "Preparing Setlist..."}
                             </span>
+                            {/* Progress Bar */}
+                            {analysisStatus === 'analyzing' && (
+                                <div className="w-full h-1 bg-black/10 rounded-full mt-2 overflow-hidden">
+                                    <div className="h-full bg-blue-500 transition-all duration-300" style={{ width: `${progress}%` }} />
+                                </div>
+                            )}
                         </div>
                     ) : (
                         "Generate Setlist"
@@ -194,7 +224,7 @@ export function SetlistDashboard() {
 
                                             <div className="flex items-center gap-6 text-sm text-muted-foreground hidden sm:flex">
                                                 <div className="flex flex-col items-end w-16">
-                                                    <span className="text-white font-mono">{track.camelot}</span>
+                                                    <span className="text-white font-mono">{track.camelot || "-"}</span>
                                                     <span className="text-xs opacity-50">KEY</span>
                                                 </div>
                                                 <div className="flex flex-col items-end w-16">

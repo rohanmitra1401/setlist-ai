@@ -120,11 +120,20 @@ export async function generateSetlistAction(
     }
 }
 
-// Reuse existing logic from previous action, but strictly as a helper now
-async function fetchPlaylistTracksAction(
+// Output: Raw tracks (no features yet)
+export async function fetchPlaylistTracksAction(
     playlistUrl: string,
-    accessToken: string
+    accessToken?: string // Optional, if we have it client side, or we get it here
 ) {
+    let token = accessToken;
+    if (!token) {
+        const session = await getServerSession(authOptions);
+        if (!session?.accessToken) {
+            throw new Error("Unauthorized");
+        }
+        token = session.accessToken;
+    }
+
     // Extract ID from URL
     let playlistId = "";
     if (playlistUrl.includes("spotify:playlist:")) {
@@ -144,7 +153,7 @@ async function fetchPlaylistTracksAction(
     }
 
     // Use shared engine fetcher
-    return await fetchPlaylistTracks(playlistId, accessToken);
+    return await fetchPlaylistTracks(playlistId, token);
 }
 
 // --- Helpers ---
