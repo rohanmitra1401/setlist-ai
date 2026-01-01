@@ -132,8 +132,8 @@ export function useAudioAnalysis() {
             // 3. Decode
             const audioBuffer = await audioContextRef.current!.decodeAudioData(arrayBuffer);
 
-            // 4. Optimize (Slice 30s - Full Preview)
-            const durationLimit = 30;
+            // 4. Optimize (Slice 15s for faster analysis)
+            const durationLimit = 15;
             const channelData = audioBuffer.getChannelData(0).slice(0, audioBuffer.sampleRate * durationLimit);
 
             // 5. Analyze - Extract BPM, Key, Energy (RMS), and Danceability
@@ -214,7 +214,7 @@ export function useAudioAnalysis() {
         const total = tracks.length;
 
         // Concurrency Control
-        const CONCURRENCY_LIMIT = 5;
+        const CONCURRENCY_LIMIT = 8;
 
         const worker = async () => {
             while (queue.length > 0) {

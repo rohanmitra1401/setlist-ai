@@ -68,6 +68,7 @@ export function SetlistDashboard() {
         downloadFile(textContent, "setlist.txt", "text/plain");
     };
 
+
     // Hybrid Analysis Hook
     const { startAnalysis, status: analysisStatus, progress, currentTrackName } = useAudioAnalysis();
 
@@ -98,6 +99,15 @@ export function SetlistDashboard() {
                 setIsLoading(false);
                 return;
             }
+
+            // Calculate estimated time (avg ~2 seconds per track with concurrency)
+            const estimatedMinutes = Math.ceil(tracks.length * 2 / 60);
+            const estimatedSeconds = tracks.length * 2 % 60;
+            const timeEstimate = estimatedMinutes > 0
+                ? `~${estimatedMinutes}m ${estimatedSeconds}s`
+                : `~${estimatedSeconds}s`;
+
+            console.log(`[Dashboard] Starting analysis of ${tracks.length} tracks. Estimated time: ${timeEstimate}`);
 
             // 2. Client Side Analysis (iTunes + Essentia)
             // This runs in the browser
