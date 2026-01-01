@@ -9,29 +9,32 @@ export async function fetchPlaylistTracks(
     accessToken: string
 ): Promise<TrackWithFeatures[]> {
     try {
-        // 1. Get Playlist Tracks
-        const tracksResponse = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=100&fields=items(track(id,name,artists,uri,album(images)))`, {
-            headers: { Authorization: `Bearer ${accessToken}` }
-        });
+        const allTracks: TrackWithFeatures[] = [];
+        let offset = 0;
+        const limit = 100;
+        let hasMore = true;
 
-        if (!tracksResponse.ok) {
-            const errorBody = await tracksResponse.text();
-            throw new Error(`Spotify API Error (Tracks): ${tracksResponse.status} ${tracksResponse.statusText} - ${errorBody}`);
-        }
+        // Paginate through ALL tracks (Spotify max 100 per request)
+        while (hasMore) {
+            const tracksResponse = await fetch(
+                `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=${limit}&offset=${offset}&fields=items(track(id,name,artists,uri,album(images))),total,next`,
+                {
+                    headers: { Authorization: `Bearer ${accessToken}` }
+                }
+            );
 
-        const data = await tracksResponse.json();
-        const tracks = data.items
-            .map((item: any) => item.track)
-            .filter((t: any) => t !== null);
+            if (!tracksResponse.ok) {
+                const errorBody = await tracksResponse.text();
+                throw new Error(`Spotify API Error (Tracks): ${tracksResponse.status} ${tracksResponse.statusText} - ${errorBody}`);
+            }
 
-        if (tracks.length === 0) return [];
+            const data = await tracksResponse.json();
+            const tracks = data.items
+                .map((item: any) => item.track)
+                .filter((t: any) => t !== null && t.id);
 
-        const validTracks = tracks.filter((t: any) => t.id);
-
-        // 2. Map to Application Model (Initialize Audio Features to 0/Empty)
-        // The CLIENT will fill these in via Essential.js
-        const mappedTracks: TrackWithFeatures[] = validTracks.map((track: any) => {
-            return {
+            // Map to Application Model
+            const mappedTracks: TrackWithFeatures[] = tracks.map((track: any) => ({
                 id: track.id,
                 name: track.name,
                 artist: track.artists.map((a: any) => a.name).join(", "),
@@ -47,13 +50,20 @@ export async function fetchPlaylistTracks(
                 camelot: "Unknown",
                 danceability: 0,
                 vibeScore: 0,
-            };
-        });
+            }));
 
-        return mappedTracks;
+            allTracks.push(...mappedTracks);
+
+            offset += limit;
+            hasMore = data.next !== null && allTracks.length < 500; // Cap at 500 to avoid very long analysis
+        }
+
+        console.log(`[PlaylistFetch] Fetched ${allTracks.length} tracks from playlist ${playlistId}`);
+        return allTracks;
 
     } catch (error: any) {
         console.error("Error fetching playlist tracks: ", error);
         throw new Error(error.message || "Failed to fetch playlist data from Spotify.");
     }
 }
+

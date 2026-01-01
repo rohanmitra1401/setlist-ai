@@ -22,37 +22,70 @@ export interface MoodInput {
 }
 
 // ----------------------------------------------------------------------
+
+// ----------------------------------------------------------------------
 // Helpers
 // ----------------------------------------------------------------------
 
 /**
- * Checks if two Camelot keys are compatible.
- * Rules:
- * 1. Exact Match (8A -> 8A)
- * 2. +/- 1 Number, Same Letter (8A -> 9A, 8A -> 7A) (Handles 12->1 wrapping)
- * 3. Same Number, Different Letter (8A -> 8B)
+ * Calculates the "Effective BPM Distance" considering Half-Time and Double-Time.
+ * e.g. Target 140. Track 70 -> Distance 0. Track 140 -> Distance 0.
  */
-function isHarmonicallyCompatible(codeA: string, codeB: string): boolean {
-    if (!codeA || !codeB || codeA === "Unknown" || codeB === "Unknown") return false;
-    if (codeA === codeB) return true;
+function getEffectiveBpmDistance(trackBpm: number, targetBpm: number): number {
+    if (!trackBpm || !targetBpm) return 100; // Penalty for missing data
 
-    const numA = parseInt(codeA.slice(0, -1));
-    const letterA = codeA.slice(-1);
-    const numB = parseInt(codeB.slice(0, -1));
-    const letterB = codeB.slice(-1);
+    const diff1x = Math.abs(trackBpm - targetBpm);
+    const diff2x = Math.abs((trackBpm * 2) - targetBpm); // Track is half-time (e.g. 70 vs 140)
+    const diff05x = Math.abs((trackBpm * 0.5) - targetBpm); // Track is double-time (e.g. 280 vs 140)
 
-    // Rule 3: Relative Major/Minor (Same Number, Different Letter)
-    if (numA === numB && letterA !== letterB) return true;
+    return Math.min(diff1x, diff2x, diff05x);
+}
 
-    // Rule 2: Adjacent Number, Same Letter
+/**
+ * Advanced Harmonic Scoring
+ * Lower is Better.
+ * 0 = Perfect / Energy Boost
+ * 10 = Compatible
+ * 100 = Clash
+ */
+function getHarmonicScore(
+    currentCamelot: string,
+    nextCamelot: string,
+    isBuildingEnergy: boolean
+): number {
+    if (!currentCamelot || !nextCamelot || currentCamelot === "Unknown" || nextCamelot === "Unknown") return 50; // Neutral penalty
+    if (currentCamelot === nextCamelot) return 0; // Perfect match
+
+    const numA = parseInt(currentCamelot.slice(0, -1));
+    const letterA = currentCamelot.slice(-1);
+    const numB = parseInt(nextCamelot.slice(0, -1));
+    const letterB = nextCamelot.slice(-1);
+
+    // 1. Same Number, Diff Letter (8A <-> 8B) - "Mood Shift"
+    if (numA === numB && letterA !== letterB) return 10;
+
+    // 2. Adjacent +/- 1 (8A <-> 9A/7A)
+    let dist = Math.abs(numA - numB);
+    if (dist === 11) dist = 1; // Wrap 12-1
+
+    if (dist === 1 && letterA === letterB) return 5; // Good mixing
+
+    // 3. ENERGY BOOST (+2 Semitones / +2 Numbers) e.g. 8A -> 10A
+    // or +7 Semitones?? No, usually +2 numbers (+7 semitones is circle of fifths opposite side?)
+    // Actually +1 Semitone = +7 Numbers on Camelot
+    // +2 Semitones = +2 Numbers on Camelot
+    // Expert advice: +2 Numbers (e.g. 8A -> 10A) is a great energy boost.
+
+    // Check for +2 Jump (Clockwise)
+    let clockwiseDist = numB - numA;
+    if (clockwiseDist < 0) clockwiseDist += 12;
+
     if (letterA === letterB) {
-        const diff = Math.abs(numA - numB);
-        if (diff === 1) return true;
-        // Wrap around 12 -> 1
-        if ((numA === 12 && numB === 1) || (numA === 1 && numB === 12)) return true;
+        if (clockwiseDist === 2 && isBuildingEnergy) return 0; // REWARD Energy Boost!
+        if (clockwiseDist === 7 && isBuildingEnergy) return 0; // +1 Semitone boost (sometimes)
     }
 
-    return false;
+    return 100; // Clash
 }
 
 
@@ -61,69 +94,66 @@ function isHarmonicallyCompatible(codeA: string, codeB: string): boolean {
 // ----------------------------------------------------------------------
 
 /**
- * Filter and select top 30 tracks based on VIBE SCORE and BPM compatibility.
+ * Select top candidates using weighted scoring instead of hard filters.
  */
 function selectTopCandidateTracks(
     allTracks: TrackWithFeatures[],
     targetBpm: number
 ): TrackWithFeatures[] {
-    // 1. Filter out tracks that are waaaay off (e.g. +/- 20 BPM)
-    let validTracks = allTracks.filter(
-        (t) => Math.abs(t.bpm - targetBpm) <= 20
-    );
 
-    // If too aggressive, loosen up
-    if (validTracks.length < 30) {
-        validTracks = allTracks.filter((t) => Math.abs(t.bpm - targetBpm) <= 40);
-    }
-    if (validTracks.length < 30) {
-        validTracks = allTracks;
-    }
+    const candidates = allTracks.map(track => {
+        const bpmDist = getEffectiveBpmDistance(track.bpm, targetBpm);
 
-    // 2. Sort primarily by Vibe Score (High to Low), then by BPM proximity
-    validTracks.sort((a, b) => {
-        // Vibe Score (descending)
-        const vibeDiff = (b.vibeScore || 0) - (a.vibeScore || 0);
-        if (Math.abs(vibeDiff) > 10) return vibeDiff;
+        // Base Score formula:
+        // VibeScore (0-100) is good. BPM Dist (0-inf) is bad.
+        // We want high score.
+        // Score = (VibeScore * 2) - (BpmDist * 5)
 
-        // Otherwise prefer closer BPM
-        const distA = Math.abs(a.bpm - targetBpm);
-        const distB = Math.abs(b.bpm - targetBpm);
-        return distA - distB;
+        let score = (track.vibeScore || 0) * 2;
+        score -= (bpmDist * 10); // VERY Heavy penalty for bad BPM
+
+        // Add random jitter to prevent deterministic sorting
+        score += (Math.random() * 10);
+
+        return { track, score };
     });
 
-    // 3. Take top 40-50
-    return validTracks.slice(0, 50);
+    // Sort by Score Descending
+    candidates.sort((a, b) => b.score - a.score);
+
+    // Take top 50, but ignore ones with REALLY bad scores (optional)
+    return candidates.slice(0, 50).map(c => c.track);
 }
 
 
 // ----------------------------------------------------------------------
-// 3. Sorting Algorithm (Parabolic Energy + BPM Constraints)
+// 3. Sorting Algorithm (Wave Structure)
 // ----------------------------------------------------------------------
 
 /**
- * Ideal Energy Curve:
- * - Starts Low (Index 0 ~ 0.3/0.4)
- * - Peaks at Index 21 (Song 22) ~ 0.9/1.0
- * - Drops at End (Index 29) ~ 0.5
+ * Wave Structure for 30 songs:
+ * 0-5: Warmup (0.3 -> 0.6)
+ * 6-12: Build 1 (0.6 -> 0.9)
+ * 13-16: Peak 1 (0.9 -> 1.0)
+ * 17-20: Reset (1.0 -> 0.6)
+ * 21-26: Build 2 (0.6 -> 0.95)
+ * 27-29: Outro (0.95 -> 0.5)
  */
 function getTargetEnergy(index: number, total: number): number {
-    if (total === 1) return 0.5;
+    const progress = index / total;
 
-    // Peak at ~70-75% of the set
-    const peakIndex = Math.floor(total * 0.73);
+    if (progress < 0.2) return 0.3 + (progress / 0.2) * 0.3; // 0.3 -> 0.6
+    if (progress < 0.45) return 0.6 + ((progress - 0.2) / 0.25) * 0.3; // 0.6 -> 0.9
+    if (progress < 0.55) return 0.9 + ((progress - 0.45) / 0.1) * 0.1; // 0.9 -> 1.0
+    if (progress < 0.65) return 1.0 - ((progress - 0.55) / 0.1) * 0.4; // 1.0 -> 0.6 (Reset)
+    if (progress < 0.9) return 0.6 + ((progress - 0.65) / 0.25) * 0.35; // 0.6 -> 0.95
+    return 0.95 - ((progress - 0.9) / 0.1) * 0.45; // 0.95 -> 0.5 (Outro)
+}
 
-    if (index <= peakIndex) {
-        // Ramp up phase
-        const progress = index / peakIndex;
-        // Lerp from 0.4 to 0.95
-        return 0.4 + (0.95 - 0.4) * (progress * progress); // slight exp curve
-    } else {
-        // Cooldown phase
-        const progress = (index - peakIndex) / (total - 1 - peakIndex);
-        // Lerp from 0.95 down to 0.6
-        return 0.95 - (0.35) * progress;
-    }
+function isBuildingPhase(index: number, total: number): boolean {
+    const progress = index / total;
+    // Build phases are 0.2-0.45 and 0.65-0.9
+    return (progress >= 0.2 && progress < 0.45) || (progress >= 0.65 && progress < 0.9);
 }
 
 export function generateSetlist(
@@ -131,136 +161,106 @@ export function generateSetlist(
     moodInput: MoodInput
 ): TrackWithFeatures[] {
 
+    // DEBUG: Log input BPM distribution
+    const inputBpms = allTracks.map(t => t.bpm).filter(b => b > 0);
+    const avgInputBpm = inputBpms.length > 0 ? inputBpms.reduce((a, b) => a + b, 0) / inputBpms.length : 0;
+    console.log(`[SetlistGen] Input: ${allTracks.length} tracks. Target BPM: ${moodInput.targetBpm}. Avg Input BPM: ${avgInputBpm.toFixed(1)}`);
+
     const pool = selectTopCandidateTracks(allTracks, moodInput.targetBpm);
     const targetLength = Math.min(pool.length, 30);
+
+    // DEBUG: Log pool BPM distribution
+    const poolBpms = pool.map(t => t.bpm).filter(b => b > 0);
+    const avgPoolBpm = poolBpms.length > 0 ? poolBpms.reduce((a, b) => a + b, 0) / poolBpms.length : 0;
+    const matchingBpmCount = allTracks.filter(t => getEffectiveBpmDistance(t.bpm, moodInput.targetBpm) <= 10).length;
+    console.log(`[SetlistGen] Pool: ${pool.length} tracks. Avg Pool BPM: ${avgPoolBpm.toFixed(1)}. Tracks within ±10 BPM (effective): ${matchingBpmCount}`);
+
+    if (targetLength === 0) return [];
 
     const sortedParams: TrackWithFeatures[] = [];
     const usedIds = new Set<string>();
 
-    // --- Greedy Approach with Constraints ---
+    // 1. Pick First Song (Closest to Warmup Energy + Target BPM)
+    let bestStart: TrackWithFeatures | null = null;
+    let bestStartScore = Infinity;
 
-    // 1. Pick First Song
-    let bestStart = findBestMatch(
-        pool,
-        usedIds,
-        getTargetEnergy(0, targetLength),
-        moodInput.targetBpm,
-        null // no previous track
-    );
+    for (const track of pool) {
+        const bpmDist = getEffectiveBpmDistance(track.bpm, moodInput.targetBpm);
+        const energyDist = Math.abs(track.energy - getTargetEnergy(0, targetLength));
 
-    if (!bestStart) return []; // Should not happen unless empty pool
+        // Lower is better
+        const score = (bpmDist * 2) + (energyDist * 10);
 
-    sortedParams.push(bestStart);
-    usedIds.add(bestStart.id);
+        if (score < bestStartScore) {
+            bestStartScore = score;
+            bestStart = track;
+        }
+    }
+
+    if (bestStart) {
+        sortedParams.push(bestStart);
+        usedIds.add(bestStart.id);
+    }
 
     // 2. Pick Subsequent Songs
     for (let i = 1; i < targetLength; i++) {
         const prevTrack = sortedParams[i - 1];
-        const desiredEnergy = getTargetEnergy(i, targetLength);
+        if (!prevTrack) break;
 
-        // Find best match in pool
-        const nextTrack = findBestMatch(
-            pool,
-            usedIds,
-            desiredEnergy,
-            moodInput.targetBpm,
-            prevTrack
-        );
+        const targetEnergy = getTargetEnergy(i, targetLength);
+        const isBuilding = isBuildingPhase(i, targetLength);
 
-        if (nextTrack) {
-            sortedParams.push(nextTrack);
-            usedIds.add(nextTrack.id);
-        } else {
-            // SOFT FALLBACK: Find "least bad" BPM jump 
-            const fallback = findFallbackTrack(pool, usedIds, prevTrack);
-            if (fallback) {
-                sortedParams.push(fallback);
-                usedIds.add(fallback.id);
-            } else {
-                break; // No more songs available
+        let bestNext: TrackWithFeatures | null = null;
+        let bestNextScore = Infinity;
+
+        // Weights
+        const W_ENERGY = 15;
+        const W_BPM = 20; // High penalty for drifting BPM
+        const W_HARMONIC = 10;
+        const W_VIBE = 5;
+
+        for (const track of pool) {
+            if (usedIds.has(track.id)) continue;
+
+            // 1. Energy Fit
+            const energyDiff = Math.abs(track.energy - targetEnergy);
+
+            // 2. BPM Fit (Relative to PREVIOUS track to ensure flow, AND Global Target)
+            // We want to flow from previous, but also stay near global target
+            const flowBpmDist = getEffectiveBpmDistance(track.bpm, prevTrack.bpm);
+
+            // 3. Harmonic
+            const harmonicScore = getHarmonicScore(prevTrack.camelot, track.camelot, isBuilding);
+
+            // 4. Vibe (Reuse existing score or calculate fresh)
+            const vibePenalty = (100 - (track.vibeScore || 0)) / 100; // 0.0 to 1.0
+
+            // TOTAL SCORE (Lower is Better)
+            // Note: If flowBpmDist is huge (>10), we massive penalize
+            const bpmPenalty = flowBpmDist > 10 ? 1000 : flowBpmDist;
+
+            const totalScore =
+                (energyDiff * W_ENERGY) +
+                (bpmPenalty * W_BPM) +
+                (harmonicScore * W_HARMONIC) +
+                (vibePenalty * W_VIBE);
+
+            if (totalScore < bestNextScore) {
+                bestNextScore = totalScore;
+                bestNext = track;
             }
+        }
+
+        if (bestNext) {
+            sortedParams.push(bestNext);
+            usedIds.add(bestNext.id);
+        } else {
+            break; // Should ideally not happen with soft scoring
         }
     }
 
     return sortedParams;
 }
 
-function findBestMatch(
-    pool: TrackWithFeatures[],
-    usedIds: Set<string>,
-    targetEnergy: number,
-    globalTargetBpm: number,
-    prevTrack: TrackWithFeatures | null
-): TrackWithFeatures | null {
+// Deprecated helpers removed (findBestMatch, findFallbackTrack) as logic is now integrated.
 
-    let bestTrack: TrackWithFeatures | null = null;
-    let bestScore = Infinity;
-
-    for (const track of pool) {
-        if (usedIds.has(track.id)) continue;
-
-        let isHarmonic = false;
-
-        // CONSTRAINT: BPM Jump (+/- 5) check
-        if (prevTrack) {
-            const bpmDiff = Math.abs(track.bpm - prevTrack.bpm);
-            if (bpmDiff > 5) continue;
-
-            // CONSTRAINT: Harmonic Mixing
-            isHarmonic = isHarmonicallyCompatible(track.camelot, prevTrack.camelot);
-
-            // Allow reverse compatibility too (A->B is same as B->A logic wise here) (?)
-            // Actually Camelot wheel is directed? No, compatibility is symmetric usually for simple adjacencies.
-            // But let's stick to our helper.
-
-            if (!isHarmonic) {
-                continue;
-            }
-        } else {
-            isHarmonic = true;
-        }
-
-        // SCORE: Energy Proximity + Vibe Score
-        const energyDiff = Math.abs(track.energy - targetEnergy);
-        const vibeBonus = (track.vibeScore || 0) / 200; // 0.0 - 0.5 benefit
-
-        // Lower score is better. Energy Diff is 0-1. VibeBonus subtracts from score.
-        const score = energyDiff - vibeBonus;
-
-        if (score < bestScore) {
-            bestScore = score;
-            bestTrack = track;
-        }
-    }
-
-    return bestTrack;
-}
-
-function findFallbackTrack(
-    pool: TrackWithFeatures[],
-    usedIds: Set<string>,
-    prevTrack: TrackWithFeatures
-): TrackWithFeatures | null {
-    // Just find the one with the smallest BPM jump, ignoring energy curve
-    let bestTrack: TrackWithFeatures | null = null;
-    let minBpmDiff = Infinity;
-
-    for (const track of pool) {
-        if (usedIds.has(track.id)) continue;
-
-        const bpmDiff = Math.abs(track.bpm - prevTrack.bpm);
-        let score = bpmDiff;
-
-        // Slight tie-breaker for Harmonic if available
-        if (isHarmonicallyCompatible(prevTrack.camelot, track.camelot)) {
-            score -= 5;
-        }
-
-        if (score < minBpmDiff) {
-            minBpmDiff = score;
-            bestTrack = track;
-        }
-    }
-
-    return bestTrack;
-}

@@ -82,7 +82,7 @@ export function useAudioAnalysis() {
     // Caching Helpers
     const getCachedAnalysis = (trackId: string): TrackWithFeatures | null => {
         try {
-            const key = `setlist_analysis_v1_${trackId}`;
+            const key = `setlist_analysis_v2_${trackId}`;
             const cached = localStorage.getItem(key);
             if (cached) return JSON.parse(cached);
         } catch (e) {
@@ -93,7 +93,7 @@ export function useAudioAnalysis() {
 
     const saveAnalysisToCache = (track: TrackWithFeatures) => {
         try {
-            const key = `setlist_analysis_v1_${track.id}`;
+            const key = `setlist_analysis_v2_${track.id}`;
             localStorage.setItem(key, JSON.stringify(track));
         } catch (e) {
             console.warn("Cache write error", e);
@@ -132,22 +132,44 @@ export function useAudioAnalysis() {
             // 3. Decode
             const audioBuffer = await audioContextRef.current!.decodeAudioData(arrayBuffer);
 
-            // 4. Optimize (Slice 10s)
-            const durationLimit = 10;
+            // 4. Optimize (Slice 30s - Full Preview)
+            const durationLimit = 30;
             const channelData = audioBuffer.getChannelData(0).slice(0, audioBuffer.sampleRate * durationLimit);
 
-            // 5. Analyze
+            // 5. Analyze - Extract BPM, Key, Energy (RMS), and Danceability
             const vector = essentiaRef.current.arrayToVector(channelData);
 
             const rhythmExtractor = essentiaRef.current.RhythmExtractor2013(vector);
             const bpm = rhythmExtractor.bpm;
+            const danceability = rhythmExtractor.danceability || 0.5; // Essentia basic danceability
 
             const keyExtractor = essentiaRef.current.KeyExtractor(vector);
             const key = keyExtractor.key;
             const scale = keyExtractor.scale;
             const camelot = getCamelotKey(key, scale);
 
+            // Calculate Energy using RMS (Root Mean Square)
+            // Essentia has a 'RMS' algo but we can also just compute it cheaply if needed.
+            // Let's use the library algo if available, otherwise manual.
+            // Essentia JS usually exposes RMS.
+            const rmsAlgo = essentiaRef.current.RMS(vector);
+            const rawEnergy = rmsAlgo.rms;
+
+            // Normalize Energy (Empirical observation: RMS usually 0.0 to 0.5 for previews)
+            // We'll clamp and scale to 0-1
+            const energy = Math.min(1, Math.max(0, rawEnergy * 3));
+
             vector.delete();
+            // rmsAlgo.delete(); // If returned object needs deletion? Usually value or struct.
+            // EssentiaJS usually returns object { rms: number }
+
+            // Calculate Vibe Score (Simple heuristic + Randomness to prevent identical sets)
+            // High Energy + High Danceability = High Vibe
+            const calculatedVibe = (energy * 50) + (danceability * 50);
+
+            // Add jitter (+/- 10) to prevent deterministic sorting of identical tracks
+            const jitter = (Math.random() * 20) - 10;
+            const vibeScore = Math.max(0, Math.min(100, calculatedVibe + jitter));
 
             // Return enriched track
             const result = {
@@ -156,7 +178,9 @@ export function useAudioAnalysis() {
                 key: 0,
                 mode: scale === 'major' ? 1 : 0,
                 camelot,
-                // image: itunesData.artworkUrl100 || track.image
+                energy,
+                danceability,
+                vibeScore
             };
 
             // Save to Cache

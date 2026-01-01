@@ -1,7 +1,7 @@
 "use client";
 import Script from "next/script";
 import { useState } from "react";
-import { fetchPlaylistTracksAction } from "@/app/actions";
+import { fetchPlaylistTracksAction, createPlaylistAction } from "@/app/actions";
 import { generateSetlist, TrackWithFeatures } from "@/lib/setlist-logic";
 import { signIn, signOut, useSession } from "next-auth/react";
 import { useAudioAnalysis } from "@/hooks/use-audio-analysis";
@@ -14,6 +14,59 @@ export function SetlistDashboard() {
     const [setlist, setSetlist] = useState<TrackWithFeatures[] | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [exportLoading, setExportLoading] = useState(false);
+    const [exportUrl, setExportUrl] = useState("");
+
+    const handleExportSpotify = async () => {
+        if (!setlist) return;
+        setExportLoading(true);
+        try {
+            const trackUris = setlist.map(t => t.uri);
+            const name = `Setlist AI - ${new Date().toLocaleDateString()}`;
+            const result = await createPlaylistAction(name, trackUris);
+
+            if (result.success && result.url) {
+                setExportUrl(result.url);
+                alert("Playlist created successfully!");
+            } else {
+                alert(result.error || "Failed to create playlist");
+            }
+        } catch (e: any) {
+            alert(e.message || "Failed to export");
+        } finally {
+            setExportLoading(false);
+        }
+    };
+
+    const downloadFile = (content: string, filename: string, type: string) => {
+        const blob = new Blob([content], { type });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+
+    const handleDownloadCSV = () => {
+        if (!setlist) return;
+        const headers = ["Track Name", "Artist", "BPM", "Key", "Camelot", "Energy"];
+        const rows = setlist.map(t =>
+            `"${t.name}","${t.artist}",${t.bpm},"${t.key}","${t.camelot}",${t.energy}`
+        );
+        const csvContent = [headers.join(","), ...rows].join("\n");
+        downloadFile(csvContent, "setlist.csv", "text/csv");
+    };
+
+    const handleDownloadText = () => {
+        if (!setlist) return;
+        const textContent = setlist.map((t, i) =>
+            `${i + 1}. ${t.name} - ${t.artist} [${t.bpm} BPM] [${t.camelot}]`
+        ).join("\n");
+        downloadFile(textContent, "setlist.txt", "text/plain");
+    };
 
     // Hybrid Analysis Hook
     const { startAnalysis, status: analysisStatus, progress, currentTrackName } = useAudioAnalysis();
@@ -192,7 +245,41 @@ export function SetlistDashboard() {
                 <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
                     <div className="flex items-center justify-between px-2">
                         <h2 className="text-2xl font-bold tracking-tight">Your Setlist</h2>
-                        <span className="text-sm text-muted-foreground bg-white/5 px-3 py-1 rounded-full border border-white/5">{setlist.length} Tracks</span>
+                        <div className="flex items-center gap-2">
+                            <div className="flex gap-2">
+                                <button
+                                    onClick={handleDownloadCSV}
+                                    className="text-xs border border-white/20 hover:bg-white/10 text-white px-3 py-2 rounded-full transition"
+                                >
+                                    CSV
+                                </button>
+                                <button
+                                    onClick={handleDownloadText}
+                                    className="text-xs border border-white/20 hover:bg-white/10 text-white px-3 py-2 rounded-full transition"
+                                >
+                                    TXT
+                                </button>
+                                {exportUrl ? (
+                                    <a
+                                        href={exportUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-xs bg-[#1DB954] text-white px-4 py-2 rounded-full hover:bg-opacity-90 transition font-medium"
+                                    >
+                                        Open in Spotify
+                                    </a>
+                                ) : (
+                                    <button
+                                        onClick={handleExportSpotify}
+                                        disabled={exportLoading}
+                                        className="text-xs bg-white text-black px-4 py-2 rounded-full hover:bg-white/80 transition font-medium disabled:opacity-50"
+                                    >
+                                        {exportLoading ? "Saving..." : "Save to Spotify"}
+                                    </button>
+                                )}
+                            </div>
+                            <span className="text-sm text-muted-foreground bg-white/5 px-3 py-1 rounded-full border border-white/5">{setlist.length} Tracks</span>
+                        </div>
                     </div>
 
                     <div className="rounded-2xl border border-white/10 bg-black/20 overflow-hidden backdrop-blur-sm">
