@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { searchItunesPreview } from "@/app/actions-itunes";
+import { findTrackPreview } from "@/app/actions-itunes";
 import { TrackWithFeatures } from "@/lib/setlist-engine";
 
 // Helper for Camelot Key
@@ -113,20 +113,16 @@ export function useAudioAnalysis() {
         if (!essentiaRef.current) return track;
 
         try {
-            // 1. Search iTunes
-            const query = `${track.artist} ${track.name}`;
-            const itunesData = await searchItunesPreview(query);
+            // 1. Find a preview (iTunes -> Deezer cascade, fuzzy-matched)
+            const preview = await findTrackPreview(track.artist, track.name);
 
-            if (!itunesData || !itunesData.previewUrl) {
+            if (!preview.previewUrl) {
                 console.warn(`No preview found for ${track.name}`);
-                // Cache failure too? Or just return raw? 
-                // Let's cache the raw one so we don't retry forever, maybe with a flag?
-                // For now, just return raw.
                 return track;
             }
 
             // 2. Fetch Audio
-            const response = await fetch(itunesData.previewUrl);
+            const response = await fetch(preview.previewUrl);
             const arrayBuffer = await response.arrayBuffer();
 
             // 3. Decode
@@ -140,7 +136,9 @@ export function useAudioAnalysis() {
             const vector = essentiaRef.current.arrayToVector(channelData);
 
             const rhythmExtractor = essentiaRef.current.RhythmExtractor2013(vector);
-            const bpm = rhythmExtractor.bpm;
+            // Prefer measured BPM; fall back to Deezer catalog BPM if measurement failed
+            const measuredBpm = rhythmExtractor.bpm;
+            const bpm = measuredBpm && measuredBpm > 40 ? measuredBpm : preview.knownBpm;
             const danceability = rhythmExtractor.danceability || 0.5; // Essentia basic danceability
 
             const keyExtractor = essentiaRef.current.KeyExtractor(vector);
