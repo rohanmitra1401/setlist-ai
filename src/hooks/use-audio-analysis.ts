@@ -53,8 +53,11 @@ export function useAudioAnalysis() {
             }
 
             // Init AudioContext
+            // CRITICAL: Essentia's algorithms assume 44100 Hz. Without this option the
+            // context uses the hardware rate (often 48000 Hz) and decodeAudioData
+            // resamples to it, deflating every measured BPM by ~8.8% and shifting keys.
             if (!audioContextRef.current) {
-                audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+                audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 44100 });
             }
 
             // Init WASM
@@ -82,7 +85,7 @@ export function useAudioAnalysis() {
     // Caching Helpers
     const getCachedAnalysis = (trackId: string): TrackWithFeatures | null => {
         try {
-            const key = `setlist_analysis_v2_${trackId}`;
+            const key = `setlist_analysis_v3_${trackId}`;
             const cached = localStorage.getItem(key);
             if (cached) return JSON.parse(cached);
         } catch (e) {
@@ -93,7 +96,7 @@ export function useAudioAnalysis() {
 
     const saveAnalysisToCache = (track: TrackWithFeatures) => {
         try {
-            const key = `setlist_analysis_v2_${track.id}`;
+            const key = `setlist_analysis_v3_${track.id}`;
             localStorage.setItem(key, JSON.stringify(track));
         } catch (e) {
             console.warn("Cache write error", e);
@@ -205,6 +208,14 @@ export function useAudioAnalysis() {
         setStatus("analyzing");
         setAnalyzedTracks([]);
         setProgress(0);
+
+        // Purge poisoned v2 cache entries (analyzed at wrong sample rate)
+        try {
+            for (let i = localStorage.length - 1; i >= 0; i--) {
+                const k = localStorage.key(i);
+                if (k && k.startsWith("setlist_analysis_v2_")) localStorage.removeItem(k);
+            }
+        } catch { /* ignore */ }
 
         const allResults: TrackWithFeatures[] = [];
         const queue = [...tracks];
