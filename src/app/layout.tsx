@@ -14,8 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Setlist AI",
-  description: "Analyze your Spotify playlists",
+  title: "Setlist AI — Engineered setlists, not shuffles",
+  description:
+    "Paste a Spotify playlist. We measure BPM, key and energy from the actual audio, then sequence a set that warms up, peaks, and lands.",
 };
 
 export default function RootLayout({

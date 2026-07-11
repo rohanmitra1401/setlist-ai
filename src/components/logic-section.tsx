@@ -2,76 +2,113 @@
 
 import { motion } from "framer-motion";
 
+const StepAnalyze = () => (
+    <svg viewBox="0 0 120 40" className="w-full h-10" aria-hidden>
+        {Array.from({ length: 24 }).map((_, i) => {
+            const heights = [8, 14, 22, 30, 26, 34, 18, 28, 36, 24, 32, 16, 26, 34, 20, 30, 12, 22, 28, 16, 24, 10, 18, 8];
+            const h = heights[i];
+            return (
+                <rect
+                    key={i}
+                    x={i * 5}
+                    y={(40 - h) / 2}
+                    width="2.5"
+                    height={h}
+                    rx="1"
+                    fill={i % 5 === 0 ? "var(--accent)" : "rgba(255,255,255,0.25)"}
+                />
+            );
+        })}
+    </svg>
+);
+
+const StepKeys = () => (
+    <svg viewBox="0 0 120 40" className="w-full h-10" aria-hidden>
+        {Array.from({ length: 12 }).map((_, i) => {
+            const hue = i * 30;
+            const active = i === 7 || i === 8 || i === 6;
+            return (
+                <circle
+                    key={i}
+                    cx={12 + i * 9}
+                    cy="20"
+                    r={active ? 4 : 2.5}
+                    fill={`hsl(${hue} 85% 65% / ${active ? 0.9 : 0.25})`}
+                />
+            );
+        })}
+        <path
+            d="M66,20 Q75,8 84,20"
+            fill="none"
+            stroke="var(--accent)"
+            strokeWidth="1"
+            opacity="0.7"
+        />
+    </svg>
+);
+
+const StepArc = () => (
+    <svg viewBox="0 0 120 40" className="w-full h-10" aria-hidden>
+        <path
+            d="M4,36 C30,34 40,8 60,6 C80,4 95,26 116,34"
+            fill="none"
+            stroke="var(--accent)"
+            strokeWidth="1.5"
+        />
+        {[4, 30, 60, 90, 116].map((x, i) => {
+            const ys = [36, 22, 6, 20, 34];
+            return <circle key={i} cx={x} cy={ys[i]} r="2" fill="var(--accent)" />;
+        })}
+    </svg>
+);
+
+const steps = [
+    {
+        n: "01",
+        title: "Analyze",
+        body: "Every track's preview is decoded in your browser. Essentia measures true BPM, key, and energy from the waveform — no stale metadata.",
+        visual: StepAnalyze,
+    },
+    {
+        n: "02",
+        title: "Match keys",
+        body: "Transitions follow the Camelot wheel. Adjacent keys mix clean; clashes are scored out of the sequence.",
+        visual: StepKeys,
+    },
+    {
+        n: "03",
+        title: "Shape the arc",
+        body: "The set builds like a real one: warm-up, climb, peak, cool-down. No random walks through your library.",
+        visual: StepArc,
+    },
+];
+
 export function LogicSection() {
     return (
-        <section className="w-full max-w-5xl mx-auto py-24 px-4">
-            <div className="text-center mb-16 space-y-4">
-                <h2 className="text-4xl md:text-5xl font-black tracking-tight text-white">
-                    The Science of Flow
-                </h2>
-                <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-                    We don't just shuffle. We engineer the perfect listening experience using professional DJ principles.
-                </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                {/* Card 1: The Mountain Curve */}
-                <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    viewport={{ once: true }}
-                    transition={{ delay: 0.1 }}
-                    className="relative group p-8 rounded-3xl bg-black/40 border border-white/10 backdrop-blur-xl hover:bg-black/50 transition-colors overflow-hidden"
-                >
-                    <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-
-                    <div className="relative z-10 space-y-6">
-                        <div className="h-48 w-full bg-black/20 rounded-xl border border-white/5 flex items-end justify-center px-8 pb-8 overflow-hidden">
-                            {/* Abstract Curve Visualization */}
-                            <svg viewBox="0 0 100 50" className="w-full h-full stroke-blue-500 stroke-[3] fill-none drop-shadow-[0_0_15px_rgba(59,130,246,0.5)]">
-                                <path d="M0,50 C20,50 30,10 50,5 C70,0 80,50 100,50" />
-                            </svg>
-                            <div className="absolute top-4 right-4 text-xs font-mono text-blue-400">ENERGY_LEVEL: OPTIMAL</div>
+        <section className="mt-24 border-t border-border pt-14">
+            <p className="font-mono text-[11px] tracking-[0.25em] text-faint mb-10">
+                HOW IT WORKS
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-px bg-border border border-border rounded-lg overflow-hidden">
+                {steps.map((s, i) => (
+                    <motion.div
+                        key={s.n}
+                        initial={{ opacity: 0, y: 12 }}
+                        whileInView={{ opacity: 1, y: 0 }}
+                        viewport={{ once: true }}
+                        transition={{ delay: i * 0.08 }}
+                        className="bg-surface p-6 md:p-7"
+                    >
+                        <div className="mb-6">
+                            <s.visual />
                         </div>
-
-                        <div>
-                            <h3 className="text-2xl font-bold text-white mb-2">Parabolic Energy Curve</h3>
-                            <p className="text-muted-foreground leading-relaxed">
-                                Random shuffle kills the vibe. Our engine builds a "Mountain" structure: starting with a warm-up, climbing to a peak, and gently cooling down.
-                            </p>
+                        <div className="flex items-baseline gap-3 mb-2">
+                            <span className="font-mono text-[11px] text-accent">{s.n}</span>
+                            <h3 className="text-base font-semibold">{s.title}</h3>
                         </div>
-                    </div>
-                </motion.div>
-
-                {/* Card 2: Harmonic Mixing */}
-                <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    viewport={{ once: true }}
-                    transition={{ delay: 0.2 }}
-                    className="relative group p-8 rounded-3xl bg-black/40 border border-white/10 backdrop-blur-xl hover:bg-black/50 transition-colors overflow-hidden"
-                >
-                    <div className="absolute inset-0 bg-gradient-to-br from-violet-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-
-                    <div className="relative z-10 space-y-6">
-                        <div className="h-48 w-full bg-black/20 rounded-xl border border-white/5 flex items-center justify-center relative overflow-hidden">
-                            {/* Abstract Camelot Ring */}
-                            <div className="absolute w-32 h-32 rounded-full border-2 border-violet-500/30 flex items-center justify-center">
-                                <div className="w-20 h-20 rounded-full border-2 border-violet-500/60 flex items-center justify-center animate-pulse">
-                                    <div className="w-8 h-8 rounded-full bg-violet-500 shadow-[0_0_30px_rgba(139,92,246,0.6)]" />
-                                </div>
-                            </div>
-                            <div className="absolute top-4 right-4 text-xs font-mono text-violet-400">HARMONIC_MATCH: TRUE</div>
-                        </div>
-
-                        <div>
-                            <h3 className="text-2xl font-bold text-white mb-2">Harmonic Mixing</h3>
-                            <p className="text-muted-foreground leading-relaxed">
-                                No more key clashes. We use the Camelot Wheel to ensure every track transition is harmonically compatible, creating a seamless, musical journey.
-                            </p>
-                        </div>
-                    </div>
-                </motion.div>
+                        <p className="text-sm text-muted leading-relaxed">{s.body}</p>
+                    </motion.div>
+                ))}
             </div>
         </section>
     );

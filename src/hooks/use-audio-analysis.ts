@@ -26,6 +26,31 @@ const getCamelotKey = (key: string, scale: string): string => {
 
 export type AnalysisStatus = "idle" | "loading_scripts" | "analyzing" | "complete" | "error";
 
+/**
+ * Correct octave errors in beat detection.
+ * Beat trackers sometimes lock onto the half- or double-beat (e.g. reporting
+ * 69.6 for a 139 BPM track). If a catalog BPM is available (Deezer), use it to
+ * arbitrate: pick whichever of {raw, raw*2, raw/2} is closest, and if that's
+ * within 8% of catalog, trust the catalog value. Otherwise fold the measured
+ * value into the 85-170 dance range.
+ */
+const correctBpm = (raw: number, catalog: number): number => {
+    if (!raw || raw <= 0) return catalog || 0;
+
+    if (catalog > 0) {
+        const candidates = [raw, raw * 2, raw / 2];
+        const closest = candidates.reduce((a, b) =>
+            Math.abs(b - catalog) < Math.abs(a - catalog) ? b : a
+        );
+        if (Math.abs(closest - catalog) / catalog < 0.08) return catalog;
+    }
+
+    let bpm = raw;
+    while (bpm < 85) bpm *= 2;
+    while (bpm > 170) bpm /= 2;
+    return bpm;
+};
+
 export function useAudioAnalysis() {
     const [status, setStatus] = useState<AnalysisStatus>("idle");
     const [progress, setProgress] = useState(0); // 0-100
@@ -87,7 +112,11 @@ export function useAudioAnalysis() {
         try {
             const key = `setlist_analysis_v3_${trackId}`;
             const cached = localStorage.getItem(key);
-            if (cached) return JSON.parse(cached);
+            if (cached) {
+                const t = JSON.parse(cached);
+                // Apply octave correction to entries cached before it existed
+                return { ...t, bpm: correctBpm(t.bpm, 0) };
+            }
         } catch (e) {
             console.warn("Cache read error", e);
         }
@@ -139,9 +168,8 @@ export function useAudioAnalysis() {
             const vector = essentiaRef.current.arrayToVector(channelData);
 
             const rhythmExtractor = essentiaRef.current.RhythmExtractor2013(vector);
-            // Prefer measured BPM; fall back to Deezer catalog BPM if measurement failed
-            const measuredBpm = rhythmExtractor.bpm;
-            const bpm = measuredBpm && measuredBpm > 40 ? measuredBpm : preview.knownBpm;
+            // Octave-correct the measured BPM, arbitrating with Deezer catalog BPM
+            const bpm = correctBpm(rhythmExtractor.bpm, preview.knownBpm);
             const danceability = rhythmExtractor.danceability || 0.5; // Essentia basic danceability
 
             const keyExtractor = essentiaRef.current.KeyExtractor(vector);
