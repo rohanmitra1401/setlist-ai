@@ -47,13 +47,14 @@ export const authOptions: NextAuthOptions = {
     secret: process.env.NEXTAUTH_SECRET,
     callbacks: {
         async jwt({ token, account, user }) {
-            // Initial sign in
+            // Initial sign in. Keep the default claims (name, email, picture, sub):
+            // next-auth builds session.user from them.
             if (account && user) {
                 return {
+                    ...token,
                     accessToken: account.access_token,
                     accessTokenExpires: account.expires_at ? account.expires_at * 1000 : Date.now() + 3600 * 1000,
                     refreshToken: account.refresh_token,
-                    user,
                 };
             }
 
